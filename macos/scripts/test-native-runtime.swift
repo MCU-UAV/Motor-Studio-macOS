@@ -14,11 +14,19 @@ import MotorCore
         engine.commandMailbox.prepare(config)
         let loop = Task.detached { await engine.run(config) }
         try await Task.sleep(for: .milliseconds(100))
+        let baselineStart = await engine.snapshot()
+        try await Task.sleep(for: .milliseconds(700))
         let before = await engine.snapshot()
         // Intentionally block MainActor: acquisition must continue independently.
         await MainActor.run { Thread.sleep(forTimeInterval: 0.7) }
         let after = await engine.snapshot()
-        precondition(after.stats.received - before.stats.received >= 55, "Acquisition stalled with MainActor")
+        let baselineFrames = before.stats.received - baselineStart.stats.received
+        let blockedFrames = after.stats.received - before.stats.received
+        print("MainActor isolation: baseline \(baselineFrames), blocked \(blockedFrames) frames per 700 ms")
+        // Shared CI runners need not sustain 100 Hz. Compare equal windows on
+        // this host; moving acquisition onto MainActor still yields zero frames.
+        precondition(baselineFrames > 0 && blockedFrames > 0 && blockedFrames * 2 >= baselineFrames,
+                     "Acquisition stalled with MainActor")
         var newer = MotorCommand(id: 0, mode: .foc); newer.position = 0.8
         engine.commandMailbox.update([0:newer], runID: runID, revision: 2)
         engine.commandMailbox.update([0:MotorCommand(id:0)], runID: runID, revision: 1)
