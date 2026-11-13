@@ -71,11 +71,15 @@ public struct MaintenanceController: Sendable {
     let progress: @Sendable (MaintenanceProgress) -> Void
     public init(transport: any MaintenanceTransport, clientTag: UInt32,
                 timestamp: @escaping @Sendable () -> UInt32 = { UInt32(Date().timeIntervalSince1970) },
-                sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+                sleep: (@Sendable (Duration) async throws -> Void)? = nil,
                 now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
                 progress: @escaping @Sendable (MaintenanceProgress) -> Void = { _ in }) {
         self.transport = transport; self.clientTag = clientTag; self.timestamp = timestamp
-        self.sleep = sleep; self.now = now; self.progress = progress
+        // Keep the async closure in this module. A public default-argument
+        // closure can emit mismatched context layouts in library/client objects
+        // with Apple Swift 6.3.3 (swiftlang/swift#92017).
+        self.sleep = sleep ?? { try await Task.sleep(for: $0) }
+        self.now = now; self.progress = progress
     }
     public func run(_ operation: MaintenanceOperation, id: Int) async throws -> MaintenanceResult {
         guard (0...14).contains(id) else { throw MotorError.invalid("设备 ID 必须为 0–14") }
