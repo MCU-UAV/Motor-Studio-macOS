@@ -12,31 +12,35 @@ struct MotorsPage: View {
                     Spacer()
                     Toggle("统一应用参数", isOn: $model.unifiedControl)
                         .toggleStyle(.switch).controlSize(.mini).font(.system(size: 11)).disabled(model.busy)
-                    Button("扫描在线 ID") { model.scan() }.buttonStyle(ActionStyle()).disabled(model.state != .ready)
+                    Button("自动检测") { model.detectMotors() }.buttonStyle(ActionStyle()).disabled(model.state != .ready && model.state != .running)
                 }
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5), spacing: 10) {
                     ForEach(0...14, id: \.self) { id in motorTile(id) }
                 }
-                Text("扫描会广播停止并复位总线，读取 Bootloader 返回的 ID；重复 ID 可在设备工具中按序列号修复。")
+                Text("自动检测先停止通信，再逐台检测应用模式电机。引导扫描与重复 ID 修复位于设备工具。")
                     .font(.system(size: 10)).foregroundStyle(.tertiary)
             }
             HStack(alignment: .top, spacing: 20) {
                 Panel("实时反馈", subtitle: model.displaySide.rawValue) {
-                    Grid(alignment: .leading, horizontalSpacing: 22, verticalSpacing: 17) {
-                        GridRow {
-                            Text("ID"); Text("位置 · rad"); Text("速度 · rad/s"); Text("扭矩 · N·m"); Text("状态")
-                        }.font(.system(size: 10)).foregroundStyle(.tertiary)
-                        Divider().gridCellColumns(5).opacity(0.3)
-                        ForEach(model.selectedIDs.sorted(), id: \.self) { id in
+                    ScrollView(.horizontal) {
+                        Grid(alignment: .leading, horizontalSpacing: 22, verticalSpacing: 12) {
                             GridRow {
-                                Text(String(format: "%02d", id)).foregroundStyle(StudioTheme.mint)
-                                Text(number(model.telemetry[id].map { model.displaySide.position($0.position) }))
-                                Text(number(model.telemetry[id].map { model.displaySide.position($0.speed) }))
-                                Text(number(model.telemetry[id].map { model.displaySide.torque($0.torque) }))
-                                Text(status(id)).foregroundStyle(model.telemetry[id] == nil ? .secondary : StudioTheme.mint)
-                            }.font(.system(size: 11, design: .monospaced)).monospacedDigit()
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
+                                Text("参数 / 反馈").frame(width: 145, alignment: .leading)
+                                ForEach(model.selectedIDs.sorted(), id: \.self) { id in
+                                    Text("ID \(id)").frame(width: 110, alignment: .trailing)
+                                }
+                            }.foregroundStyle(StudioTheme.mint)
+                            ForEach(MotorTableRow.allCases) { row in
+                                GridRow {
+                                    Text(row.rawValue).foregroundStyle(.secondary)
+                                    ForEach(model.selectedIDs.sorted(), id: \.self) { id in
+                                        Text(row.value(sample: model.telemetry[id], command: model.commands[model.broadcastControl ? 15 : id], side: model.displaySide, running: model.state == .running))
+                                            .frame(width: 110, alignment: .trailing).textSelection(.enabled)
+                                    }
+                                }
+                            }
+                        }.font(.system(size: 11, design: .monospaced)).monospacedDigit()
+                    }
                     if model.selectedIDs.isEmpty { Text("选择上方 ID，或扫描在线电机").font(.system(size: 12)).foregroundStyle(.secondary) }
                 }
                 ControlPanel().frame(width: 300)
@@ -62,12 +66,9 @@ struct MotorsPage: View {
         }.padding(14).background(selected ? StudioTheme.mint.opacity(0.07) : .black.opacity(0.1), in: RoundedRectangle(cornerRadius: 13))
             .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(selected ? StudioTheme.mint.opacity(0.3) : .white.opacity(0.07), lineWidth: 0.8))
     }
-    private func number(_ value: Double?) -> String { value.map { String(format: "%.3f", $0) } ?? "—" }
     private func status(_ id: Int) -> String {
-        guard let sample = model.telemetry[id] else { return "无反馈" }
-        if sample.demo { return "演示" }
-        if model.state != .running { return "上次反馈" }
-        return Date.now.timeIntervalSince(sample.time) < 1 ? "在线" : "反馈过期"
+        MotorTableRow.communication.value(sample: model.telemetry[id], command: nil,
+            side: model.displaySide, running: model.state == .running)
     }
 }
 

@@ -79,6 +79,7 @@ struct MotorHealthDisplay: Equatable {
     var maintenanceProgress: Double = 0
     var maintenanceStage = "选择设备操作"
     var maintenanceFailed = false
+    var temporaryBootActive = false
     var maintenanceHistory: [String] = []
     @ObservationIgnored private var maintenanceTask: Task<Void, Never>?
     @ObservationIgnored private var maintenanceRunID = UUID()
@@ -110,15 +111,19 @@ struct MotorHealthDisplay: Equatable {
         let request = ChartRequest(motorID: selectedID, metrics: metrics, side: side,
                                    window: chartWindow, offset: chartOffset,
                                    end: chartRefreshing ? nil : frozenChartEnd,
-                                   budget: budget, broadcast: broadcastControl)
+                                   budget: budget, broadcast: broadcastControl && demo)
         return await acquisition.recordings.chart(request)
     }
     private func apply(_ snapshot: AcquisitionSnapshot, force: Bool = true) {
         telemetry = snapshot.telemetry; stats = snapshot.stats; lastTX = snapshot.lastTX
+        if broadcastControl && !demo && !snapshot.telemetry.isEmpty {
+            selectedIDs = Set(snapshot.telemetry.keys)
+            if !selectedIDs.contains(selectedID), let first = selectedIDs.min() { selectMotor(first) }
+        }
         health = snapshot.telemetry.mapValues(MotorHealthDisplay.init)
         elapsed = snapshot.elapsed; actualFrequency = snapshot.actualFrequency
         if force || lastStatisticsDisplay.duration(to: .now) >= .milliseconds(50) {
-            statisticsText = "发送 \(stats.sent) · 接收 \(stats.received) · 实测 \(String(format: "%.0f", actualFrequency)) Hz · 超时 \(String(format: "%.1f", lossPercent))%"
+            statisticsText = "发送 \(String(format: "%.0f", snapshot.transmitFrequency)) Hz · 接收 \(String(format: "%.0f", actualFrequency)) Hz · 累计 \(stats.sent)/\(stats.received) · 超时 \(String(format: "%.1f", lossPercent))%"
             lastStatisticsDisplay = .now
         }
         recordCount = snapshot.records.count; historySpan = floor(snapshot.records.span)
@@ -162,7 +167,7 @@ struct MotorHealthDisplay: Equatable {
         if selectedID != id { firmwareVersion = nil }
         selectedID = id
         invalidControlFields = []
-        draft = (commands[id] ?? MotorCommand(id: id, mode: .foc)).converted(to: displaySide)
+        draft = (commands[broadcastControl ? 15 : id] ?? MotorCommand(id: id, mode: .foc)).converted(to: displaySide)
         refreshChart()
     }
     private func resetControlInputs() {
@@ -194,7 +199,8 @@ struct MotorHealthDisplay: Equatable {
             return false
         }
         do {
-            var command = draft
+            var command = try draft.clamped()
+            if command != draft { draft = command; log("参数已按协议范围限幅，显示值为生效目标") }
             command.id = broadcastControl ? 15 : selectedID
             command.timeoutProtection = true
             _ = try command.encode()
@@ -211,12 +217,10 @@ struct MotorHealthDisplay: Equatable {
     }
     func start() {
         guard state == .ready, broadcastControl || !selectedIDs.isEmpty else { return }
-        guard demo || !broadcastControl else {
-            notice = "广播没有逐台应答，无法完成启动保护确认；请选择电机 ID 并使用统一应用参数。"
-            return
-        }
         guard broadcastControl || selectedIDs.contains(selectedID) else { notice = "请勾选当前电机 ID 后再开始"; return }
-        guard frequency.isFinite, (1...1000).contains(frequency), applyDraft() else { return }
+        do { frequency = try ControlFrequency.normalized(frequency) }
+        catch { report(error); return }
+        guard applyDraft() else { return }
         activeIDs = broadcastControl ? [15] : selectedIDs.sorted()
         for id in activeIDs where commands[id] == nil { commands[id] = MotorCommand(id: id) }
         let id = UUID(); runID = id; commandRevision = 0
@@ -262,9 +266,12 @@ struct MotorHealthDisplay: Equatable {
     func stop(disconnect: Bool = false, completion: (() -> Void)? = nil) {
         guard state != .disconnected else { completion?(); return }
         guard state != .stopping && state != .connecting && state != .maintaining else { return }
+        let detection = state == .scanning ? maintenanceTask : nil
+        detection?.cancel()
         let oldLoop = loop; oldLoop?.cancel(); loop = nil
         displayTask?.cancel(); displayTask = nil; state = .stopping
         Task {
+            if let detection { await detection.value }
             if let oldLoop {
                 let result = await oldLoop.value
                 apply(result.snapshot); stopConfirmed = result.stopConfirmed
@@ -286,6 +293,37 @@ struct MotorHealthDisplay: Equatable {
             selectedIDs = [0, 1, 2]; selectMotor(0)
             log("演示扫描：ID 0、1、2；未发送设备命令")
         } else { maintain(.scanIDs) }
+    }
+    func detectMotors() {
+        if state == .running {
+            stop { [weak self] in
+                guard let self, self.stopConfirmed else { return }
+                self.detectMotors()
+            }
+            return
+        }
+        guard state == .ready else { return }
+        if demo { scan(); resetControlInputs(); return }
+        state = .scanning; resetControlInputs()
+        selectedIDs = []; activeIDs = []; telemetry = [:]; health = [:]; discoveredDevices = []
+        log("自动检测：逐台发送停止探测，完成后保持停止")
+        maintenanceTask = Task {
+            do {
+                let replies = try await session.detectOnlineMotors()
+                let ids = replies.map(\.id)
+                selectedIDs = Set(ids); activeIDs = ids
+                telemetry = Dictionary(uniqueKeysWithValues: replies.map { ($0.id, Sample($0)) })
+                health = telemetry.mapValues(MotorHealthDisplay.init)
+                if let first = ids.first { selectMotor(first) }
+                resetControlInputs()
+                log(ids.isEmpty ? "未检测到应用模式电机；可在设备工具中扫描或切换引导" : "自动检测完成：ID \(ids.map(String.init).joined(separator: ", "))")
+                let abnormal = replies.filter { $0.error != 0 || $0.timedOut || $0.mode != 0 }.map(\.id)
+                if !abnormal.isEmpty { log("检测到异常反馈：ID \(abnormal.map(String.init).joined(separator: ", "))；请查看反馈表", failure: true) }
+            } catch { report(error) }
+            stats = await session.statistics
+            if state == .scanning { state = .ready }
+            maintenanceTask = nil
+        }
     }
     func clearRecording() {
         Task {
@@ -311,6 +349,7 @@ struct MotorHealthDisplay: Equatable {
     func maintain(_ operation: MaintenanceOperation) {
         guard state == .ready, !demo else { return }
         state = .maintaining
+        if case .temporaryBoot = operation { temporaryBootActive = true }
         resetControlInputs(); firmwareVersion = nil
         maintenanceProgress = 0; maintenanceFailed = false; maintenanceHistory = []
         maintenanceStage = operation.title
@@ -357,6 +396,8 @@ struct MotorHealthDisplay: Equatable {
                 report(MotorError.serial("\(maintenanceStage)。\(error is CancellationError ? "" : error.localizedDescription) 可保留供电与连接，重新执行升级或引导切换；改 ID / 波特率中断时请分别检查新旧值。"))
             }
             resetControlInputs()
+            if temporaryBootActive { stopConfirmed = false }
+            temporaryBootActive = false
             stats = await session.statistics
             baud = await session.baud
             if await session.isConnected { state = .ready }
@@ -369,7 +410,7 @@ struct MotorHealthDisplay: Equatable {
         }
     }
     func cancelMaintenance() {
-        guard state == .maintaining else { return }
+        guard state == .maintaining || state == .scanning else { return }
         maintenanceTask?.cancel()
     }
     func exportCSV() {

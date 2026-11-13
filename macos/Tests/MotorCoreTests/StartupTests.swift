@@ -4,7 +4,7 @@ import XCTest
 
 /// Models the firmware latch: timeout=1 does not clear it; only timeout=0 can.
 private final class LatchedSerial: SerialIO, @unchecked Sendable {
-    enum Failure { case none, stuck, clearMissing, armMissing, fault, wrongMode, wrongID, badCRC, motionMode }
+    enum Failure { case none, stuck, clearMissing, armMissing, fault, wrongMode, wrongID, badCRC, motionMode, motionFault, motionTimeout }
     private let lock = NSLock()
     private var latch: [Int: Bool] = [:]
     private var incoming: [UInt8] = []
@@ -31,7 +31,8 @@ private final class LatchedSerial: SerialIO, @unchecked Sendable {
         if fail == .motionMode && mode == 0x10 { mode = 0 }
         var frame: [UInt8] = [0xfc, 0xee, UInt8(replyID) | mode | (latch[id, default: true] ? 128 : 0), 30, 35, 48]
         frame += Array(repeating: 0, count: 16)
-        if fail == .fault { frame[14] = 4 }
+        if fail == .fault || (fail == .motionFault && mode == 0x10) { frame[14] = 4 }
+        if fail == .motionTimeout && mode == 0x10 { frame[2] |= 128 }
         ServoProtocol.append(try! ServoProtocol.crc(Array(frame[2...])), to: &frame)
         if fail == .badCRC { frame[22] ^= 1 }
         incoming = frame

@@ -47,15 +47,26 @@ import Foundation
             precondition(io.packets().first?[2] == 0 && io.packets().dropFirst().first?[2] == 128)
         }
         for asynchronous in [false, true] {
-            let io = LatchedSerial(.motionMode)
+          for fault: LatchedSerial.Failure in [.motionMode, .motionFault, .motionTimeout] {
+            let io = LatchedSerial(fault)
             let session = SerialSession(io: io)
             try await session.connect(path: "/dev/cu.simulated")
             let engine = AcquisitionEngine(session: session)
             let config = AcquisitionConfiguration(runID: UUID(), demo: false, ids: [0], commands: [0: MotorCommand(mode: .foc)], frequency: 100, asynchronous: asynchronous, broadcast: false)
             let result = await engine.run(config)
-            precondition(result.failure?.contains("反馈模式") == true)
+            precondition(result.failure != nil)
+            precondition(result.snapshot.records.count == 1, "Triggering feedback must be recorded")
+            let chart = await engine.recordings.chart(ChartRequest(motorID:0, metrics:[.mode,.timeout], side:.output, window:30, offset:0, end:nil, budget:32, broadcast:false))
+            precondition(chart.samples.count == 1)
+            let sample = chart.samples[0]
+            precondition(fault == .motionMode ? sample.mode == 0 : fault == .motionFault ? sample.error != 0 : sample.timedOut)
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("fault-record-\(UUID()).csv")
+            let exported = try await engine.recordings.exportCSV(to:url)
+            precondition(exported == 1)
+            try FileManager.default.removeItem(at:url)
             precondition(io.packets().filter { $0[2] & 0x70 == 0x10 }.count == 1)
             precondition(io.packets().last![2] & 0x70 == 0)
+        }
         }
         for (ids, frequency) in [([0], 1.0), ([0, 3], 2.0), (Array(0...14), 20.0)] {
             let io = LatchedSerial()
@@ -93,9 +104,17 @@ import Foundation
         _ = await cancelled.value
         precondition(io.packets().prefix(2).map { $0[2] } == [0, 128])
         precondition(io.packets().allSatisfy { $0[2] & 0x70 == 0 })
-        let broadcast = AcquisitionConfiguration(runID: UUID(), demo: false, ids: [15], commands: [15: MotorCommand(id: 15, mode: .foc)], frequency: 100, asynchronous: false, broadcast: true)
-        let rejected = await engine.run(broadcast)
-        precondition(rejected.failure != nil && io.packets().allSatisfy { $0[2] & 0x70 == 0 })
-        print("PASS lost/corrupt ACK, latch/fault, cancellation and unacknowledgeable broadcast: no FOC")
+        print("PASS lost/corrupt ACK, latch/fault and cancellation: no FOC")
+        let store = RecordingStore()
+        for i in 0...1000 {
+            await store.append(Sample(demoID:0,time:Date(timeIntervalSince1970:Double(i)/1000),phase:0))
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("csv-precision-\(UUID()).csv")
+        let exported = try await store.exportCSV(to:url)
+        let csv = try String(contentsOf:url,encoding:.utf8)
+        let timestamps = csv.split(separator:"\n").dropFirst().map{String($0.split(separator:",")[0])}
+        precondition(exported == 1001 && Set(timestamps).count == 1001, "CSV must preserve 1 ms sample times")
+        try FileManager.default.removeItem(at:url)
+        print("PASS all six triggering fault frames retained in chart/CSV; 1000 Hz CSV timestamps distinct")
     }
 }

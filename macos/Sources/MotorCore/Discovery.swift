@@ -36,12 +36,19 @@ public struct DiscoveredMotor: Sendable, Equatable {
 extension MaintenanceController {
     /// Search_ID: broadcast Stop, broadcast reset, 80 ms, read config ID, raw bytes (no CRC).
     func scanIDs() async throws -> MaintenanceResult {
+        var needsRecovery = false
         for attempt in 0..<3 {
-            do { return try await scanOnce() }
+            try Task.checkCancellation()
+            do {
+                if needsRecovery {
+                    try await sleep(.milliseconds(500))
+                    try await transport.recoverLink()
+                }
+                return try await scanOnce()
+            }
             catch MotorError.serial where attempt < 2 {
+                needsRecovery = true
                 progress(.init(0, "串口异常，准备重新连接并扫描"))
-                try await sleep(.milliseconds(500))
-                try await transport.recoverLink()
             }
         }
         throw MotorError.serial("扫描重试失败")

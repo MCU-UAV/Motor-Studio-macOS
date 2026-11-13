@@ -37,7 +37,7 @@ CRC polynomial `0x04C11DB7`, initial `0xFFFFFFFF`, no final XOR. Process each li
 - Kp: `Kp * 1280000 / R / R`
 - Kd: `Kd * 128000000 / R / R`
 
-Truncate toward zero to match the **actual distributed SDK**. Physical input ranges are validated first. Only tiny endpoint differences from published rounded bounds may clamp at integer limits. These are representation limits, not rated motor loads.
+Clamp raw fields to signed Int16 (torque/speed/Kp/Kd) or Int32 (position), then truncate toward zero to match the **actual distributed SDK**. Negative gains are represented as signed values. Nonfinite inputs and nonzero Stop parameters are rejected. Saturated UI targets reproduce the same encoded boundary, including floating-point roundoff. These are representation limits, not rated motor loads.
 
 ## Discrepancies resolved
 
@@ -53,17 +53,19 @@ Every real unicast session, including restart and asynchronous acquisition, firs
 
 If the clear response is missing/invalid or the task is cancelled, a bounded, cancellation-independent protected Stop is still attempted. Failure of either step aborts startup. A timeout during running still stops the engine; there is no automatic clear-and-resume and no ignored alarm. This is separate from Clear_Error (private mode 6), which does not replace the timeout-bit handshake.
 
-Broadcast lacks individual acknowledgements, so real broadcast startup is rejected rather than treating a sent packet as successful preparation. Selected-ID unified control remains available. Broadcast Stop and demo send-only behavior remain available. UI display scheduling stays at 20 Hz and is not used to time this handshake.
+Real broadcast startup probes application IDs 0–14 with protected Stop, requires a nonempty result, prepares every discovered ID, then enables ID15 sends. Extra unicast control frames with the current unified target monitor each discovered ID about every 100ms. Fault, timeout, mode mismatch or expired feedback stops the run. Discovery cannot establish that no silent/duplicate/newly attached device exists. Broadcast itself never acknowledges. UI refresh remains 20Hz, independent of startup.
 
 ## Limits of validation
 
-Transmit encoding has binary-derived fixtures. Receive decoding uses the published C layout and synthetic tests, not captured hardware replies. Private configuration and APP OTA have been reconstructed from the embedded SDK; see [PRIVATE-PROTOCOL.md](PRIVATE-PROTOCOL.md). Their RX fixtures are synthetic and their hardware behavior remains unverified. The protocol has no transaction sequence, so requests are serialized, stale input is discarded before each request, CRC and matching ID are required; a delayed response from the same ID cannot be distinguished perfectly. Never have two controllers on the same bus.
+Transmit encoding has binary-derived fixtures. Receive decoding uses the published C layout and synthetic tests, not captured hardware replies. Private configuration and APP OTA have been reconstructed from the embedded SDK; see [PRIVATE-PROTOCOL.md](PRIVATE-PROTOCOL.md). Their RX fixtures are synthetic and their hardware behavior remains unverified. The protocol has no transaction sequence. Synchronous requests discard stale input before sending. Streaming preserves queued/fragmented input, matches CRC-valid replies by ID/FIFO, and discards expired requests before matching. A delayed same-ID response cannot be distinguished perfectly. Never have two controllers on the same bus.
 
 ## Native control options
 
-ID 15 is broadcast and is send-only; it never increments received or creates feedback samples. Stop broadcasts first and then verifies known IDs. Output and rotor input are selectable: rotor position/speed = output × R; rotor torque = output / R; rotor Kp/Kd = output / R². Direct rotor encoding uses the same raw formulas with R=1. Range errors are rejected rather than copying the SDK's silent saturation. Actual `Set_Control_Data_Rotor` and ID 15 packets are in `parity-vectors.json`.
+ID 15 is broadcast and is send-only; it never increments received or creates feedback samples. Stop broadcasts first and then verifies known IDs. Output and rotor input are selectable: rotor position/speed = output × R; rotor torque = output / R; rotor Kp/Kd = output / R². Direct rotor encoding uses the same raw formulas with R=1. Finite out-of-range parameters now saturate exactly as the SDK and are reflected in the UI. Actual `Set_Control_Data_Rotor` and ID 15 packets are in `parity-vectors.json`.
 
-The asynchronous mode separates `beginAsync` and nonblocking `receiveAsync`. It preserves fragmented frames, permits one pending request, and releases it on timeout/cancel/stop; no sequence field exists for matching overlapping commands. `SessionTests` exercise this state using a simulated serial driver; Darwin I/O remains unverified on hardware.
+Acquisition uses `startStream` / `sendStream` / nonblocking `pollStream` in asynchronous mode, with independent send deadlines and a bounded 512-entry queue. A new send does not wait for the previous ACK or flush pending input. Cancellation, Stop and disconnect clear the queue. The older one-request `beginAsync` API remains available but is not the acquisition scheduler. StreamingTests and the delayed-bus runtime verify pipeline, fragmentation, cancellation, faults and actual feedback counts; Darwin I/O remains unverified on hardware.
+
+`ControlFrequency` matches BackCom_SetComFreq: finite target clamped to 0–10000Hz and truncated. Zero pauses control sending; cancellation still sends protected Stop. Frequency counts total normal control frames across IDs. Broadcast monitoring adds traffic. Actual TX and RX rates are reported separately; neither is a hard real-time guarantee.
 
 ## Continued state audit
 

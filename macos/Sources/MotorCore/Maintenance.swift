@@ -5,8 +5,10 @@ public protocol MaintenanceTransport: Sendable {
     func setBaud(_ baud: Int) async throws
     func collectIDs(_ request: [UInt8], timeout: Duration) async throws -> [UInt8]
     func recoverLink() async throws
+    func currentBaud() async -> Int
 }
 public extension MaintenanceTransport {
+    func currentBaud() async -> Int { ServoProtocol.baud }
     func recoverLink() async throws { throw MotorError.serial("无法恢复串口连接") }
     func collectIDs(_ request: [UInt8], timeout: Duration) async throws -> [UInt8] {
         throw MotorError.invalid("当前传输未提供原始 ID 扫描")
@@ -14,7 +16,7 @@ public extension MaintenanceTransport {
 }
 
 public enum MaintenanceOperation: Sendable {
-    case scanIDs, reorderIDs, version, serialNumber, clearError, restart, enterBootloader, switchBoot, repairDuplicateIDs
+    case scanIDs, reorderIDs, version, serialNumber, clearError, restart, enterBootloader, temporaryBoot, switchBoot, repairDuplicateIDs
     case changeID(Int), automaticBoot(Bool), changeBaud(Int), calibrate(Calibration), firmware(FirmwareImage)
     var changesDeviceState: Bool {
         switch self { case .version, .serialNumber: return false; default: return true }
@@ -29,6 +31,7 @@ public enum MaintenanceOperation: Sendable {
         case .clearError: return "清除故障"
         case .restart: return "复位电机"
         case .enterBootloader: return "进入 Bootloader"
+        case .temporaryBoot: return "临时关闭引导"
         case .switchBoot: return "执行引导切换"
         case .changeID: return "修改 ID"
         case .automaticBoot: return "设置自动引导"
@@ -64,16 +67,19 @@ public struct MaintenanceController: Sendable {
     let clientTag: UInt32
     let timestamp: @Sendable () -> UInt32
     let sleep: @Sendable (Duration) async throws -> Void
+    let now: @Sendable () -> ContinuousClock.Instant
     let progress: @Sendable (MaintenanceProgress) -> Void
     public init(transport: any MaintenanceTransport, clientTag: UInt32,
                 timestamp: @escaping @Sendable () -> UInt32 = { UInt32(Date().timeIntervalSince1970) },
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+                now: @escaping @Sendable () -> ContinuousClock.Instant = { .now },
                 progress: @escaping @Sendable (MaintenanceProgress) -> Void = { _ in }) {
         self.transport = transport; self.clientTag = clientTag; self.timestamp = timestamp
-        self.sleep = sleep; self.progress = progress
+        self.sleep = sleep; self.now = now; self.progress = progress
     }
     public func run(_ operation: MaintenanceOperation, id: Int) async throws -> MaintenanceResult {
         guard (0...14).contains(id) else { throw MotorError.invalid("设备 ID 必须为 0–14") }
+        try Task.checkCancellation()
         progress(.init(0, operation.title))
         let result: MaintenanceResult
         switch operation {
@@ -108,16 +114,15 @@ public struct MaintenanceController: Sendable {
             _ = try await stopFeedback(id)
             result = .init("故障已清除并回读确认")
         case .restart:
-            try await reset(id)
-            // RestartMotor waits for application Stop feedback; it does not require
-            // a second Boot reset ACK during the short auto-boot window.
-            _ = try await stopFeedback(id, attempts: 20)
-            result = .init("复位完成，已收到停止反馈")
+            try await restart(id)
+            result = .init("复位完成，已确认设备离线后恢复停止反馈")
         case .enterBootloader:
             try await reset(id)
             try await holdBoot(id)
             try await unlock(id, hold: true)
             result = .init("已进入 Bootloader；可更新固件或执行引导切换")
+        case .temporaryBoot:
+            return try await temporaryBoot()
         case .switchBoot:
             try await reset(id)
             let reply = try await boot(id, command: 5, timeout: .seconds(1))
@@ -154,9 +159,10 @@ public struct MaintenanceController: Sendable {
             result = .init(enabled ? "自动引导已开启并保存" : "自动引导已关闭并保存")
         case .changeBaud(let baud):
             guard [4_000_000, 6_000_000].contains(baud) else { throw MotorError.invalid("仅支持 4 / 6 Mbps") }
-            let v = try await version(id)
+            let v = try await prepareBaudChange(id)
             guard v.supportsBaudChange else { throw MotorError.invalid("修改波特率需要 Boot ≥03.0A、App ≥02.15（按 SDK 版本检查）") }
-            try await reset(id); try await unlock(id)
+            // prepareBaudChange already stopped the bus, as in Change_Motor_BaudRate.
+            try await sendReset(id); try await sleep(.milliseconds(80)); try await unlock(id)
             let value = UInt8(baud / 100_000)
             let old = try await boot(id, command: 0, address: 14)
             if old[0] != value {
@@ -187,8 +193,8 @@ public struct MaintenanceController: Sendable {
     }
 
     private func zeros(_ n: Int) -> [UInt8] { [UInt8](repeating: 0, count: n) }
-    private func control(_ id: Int, mode: Int = 6, argument: Int16 = 0) async throws -> [UInt8] {
-        try await transport.transact(MaintenanceProtocol.command(id: id, mode: mode, argument: argument), responseLength: 26, timeout: .milliseconds(100))
+    private func control(_ id: Int, mode: Int = 6, argument: Int16 = 0, timeout: Duration = .milliseconds(100)) async throws -> [UInt8] {
+        try await transport.transact(MaintenanceProtocol.command(id: id, mode: mode, argument: argument), responseLength: 26, timeout: timeout)
     }
     private func version(_ id: Int) async throws -> FirmwareVersion {
         for attempt in 0..<3 {
@@ -197,10 +203,10 @@ public struct MaintenanceController: Sendable {
         }
         throw MotorError.timeout
     }
-    private func stopFeedback(_ id: Int, attempts: Int = 3) async throws -> MotorFeedback {
+    private func stopFeedback(_ id: Int, attempts: Int = 3, timeout: Duration = .milliseconds(100)) async throws -> MotorFeedback {
         for attempt in 0..<attempts {
             do {
-                let f = try MotorFeedback.decode(await control(id, mode: 0))
+                let f = try MotorFeedback.decode(await control(id, mode: 0, timeout: timeout))
                 guard f.id == id, f.mode == 0, f.error == 0, !f.timedOut else {
                     throw MotorError.invalid("停止反馈 ID、模式、故障或超时状态异常")
                 }
@@ -210,10 +216,89 @@ public struct MaintenanceController: Sendable {
         throw MotorError.timeout
     }
     func reset(_ id: Int) async throws {
-        _ = try await transport.transact(MaintenanceProtocol.command(id: 15, mode: 0), responseLength: 0, timeout: .milliseconds(100))
+        try await stopBus()
         try await sleep(.milliseconds(1))
-        _ = try await transport.transact(MaintenanceProtocol.command(id: id, mode: 7), responseLength: 0, timeout: .milliseconds(100))
+        try await sendReset(id)
         try await sleep(.milliseconds(80))
+    }
+    private func stopBus() async throws {
+        _ = try await transport.transact(MaintenanceProtocol.command(id: 15, mode: 0), responseLength: 0, timeout: .milliseconds(100))
+    }
+    private func sendReset(_ id: Int) async throws {
+        _ = try await transport.transact(MaintenanceProtocol.command(id: id, mode: 7), responseLength: 0, timeout: .milliseconds(100))
+    }
+    private func restart(_ id: Int) async throws {
+        try await stopBus()
+        try await sleep(.milliseconds(1))
+        try await sendReset(id)
+        let deadline = now() + .seconds(3)
+        var offline = false
+        // Poll immediately: an unconditional 80 ms delay can miss the reset window.
+        while now() < deadline {
+            try Task.checkCancellation()
+            do { _ = try await stopFeedback(id, attempts: 1, timeout: .milliseconds(10)) }
+            catch MotorError.timeout { offline = true; break }
+            try await sleep(.milliseconds(1))
+        }
+        guard offline else { throw MotorError.invalid("复位未确认：设备始终响应，未观察到离线阶段") }
+        try await sleep(.milliseconds(50))
+        while now() < deadline {
+            try Task.checkCancellation()
+            do {
+                _ = try await stopFeedback(id, attempts: 1, timeout: .milliseconds(50))
+                return
+            } catch MotorError.timeout { try await sleep(.milliseconds(10)) }
+        }
+        throw MotorError.invalid("复位未完成：设备离线后未恢复正常停止反馈")
+    }
+
+    private func prepareBaudChange(_ id: Int) async throws -> FirmwareVersion {
+        let current = await transport.currentBaud()
+        let rates = [current] + [4_000_000, 6_000_000].filter { $0 != current }
+        for (index, rate) in rates.enumerated() {
+            try Task.checkCancellation()
+            if index > 0 { try await transport.setBaud(rate) }
+            progress(.init(0.02, "在 \(rate) bps 恢复应用通信"))
+            do {
+                try await stopBus()
+                // The SDK resets Boot before asking the APP version. An APP-only
+                // device may ignore this Boot request, so still probe Stop on timeout.
+                do { try await boot(id, command: 4) } catch MotorError.timeout { }
+                try await sleep(.milliseconds(50))
+                _ = try await stopFeedback(id, attempts: 10, timeout: .milliseconds(50))
+                return try await version(id)
+            } catch MotorError.timeout where index + 1 < rates.count { continue }
+        }
+        throw MotorError.timeout
+    }
+
+    private func temporaryBoot() async throws -> MaintenanceResult {
+        do {
+            try await reset(15)
+            let request = try BootRequest(id: 15, command: 1, address: 15, payload: [1] + zeros(7)).encode()
+            progress(.init(0, "持续发送临时关闭引导指令；请重新给电机上电，完成后点击退出"))
+            var needsRecovery = false
+            while true {
+                try Task.checkCancellation()
+                do {
+                    if needsRecovery {
+                        try await sleep(.milliseconds(500))
+                        try await transport.recoverLink()
+                        needsRecovery = false
+                        progress(.init(0, "连接已恢复，继续发送临时关闭引导指令"))
+                    }
+                    // Original temporary worker broadcasts; there is no device ACK.
+                    _ = try await transport.transact(request, responseLength: 0, timeout: .milliseconds(100))
+                } catch MotorError.serial {
+                    if !needsRecovery { progress(.init(0, "连接中断，等待恢复；可随时退出临时引导")) }
+                    needsRecovery = true
+                }
+                try await sleep(.microseconds(500))
+            }
+        } catch is CancellationError {
+            // Ending the worker does not save ATB or start the application.
+            return .init("已退出临时引导发送；设备状态未确认，可执行引导切换或重新连接")
+        }
     }
     @discardableResult func boot(_ id: Int, code: Int = 0, command: Int, address: Int = 0,
                                         sector: Int = 0, payload: [UInt8]? = nil, timeout: Duration = .milliseconds(100)) async throws -> [UInt8] {

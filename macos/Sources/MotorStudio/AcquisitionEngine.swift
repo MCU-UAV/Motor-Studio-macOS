@@ -16,6 +16,7 @@ struct AcquisitionSnapshot: Sendable {
     let lastTX: String
     let elapsed: Double
     let actualFrequency: Double
+    let transmitFrequency: Double
     let records: RecordSummary
 }
 struct AcquisitionResult: Sendable {
@@ -58,137 +59,164 @@ actor AcquisitionEngine {
     private var lastTX = ""
     private var elapsed: Double = 0
     private var actualFrequency: Double = 0
+    private var transmitFrequency: Double = 0
     init(session: SerialSession) { self.session = session }
 
     func reset(retention: Double) async {
         guard currentRun == nil else { return }
-        telemetry = [:]; stats = LinkStatistics(); lastTX = ""; elapsed = 0; actualFrequency = 0
+        telemetry = [:]; stats = LinkStatistics(); lastTX = ""; elapsed = 0; actualFrequency = 0; transmitFrequency = 0
         await recordings.clear(); await recordings.setRetention(retention)
     }
     func snapshot() async -> AcquisitionSnapshot {
         AcquisitionSnapshot(telemetry: telemetry, stats: stats, lastTX: lastTX, elapsed: elapsed,
-                            actualFrequency: actualFrequency, records: await recordings.summary())
+                            actualFrequency: actualFrequency, transmitFrequency: transmitFrequency, records: await recordings.summary())
     }
     func run(_ config: AcquisitionConfiguration) async -> AcquisitionResult {
         guard currentRun == nil, !config.ids.isEmpty, config.frequency.isFinite,
-              (1...1000).contains(config.frequency), config.ids.allSatisfy({ config.broadcast ? $0 == 15 : (0...14).contains($0) }) else {
+              config.ids.allSatisfy({ config.broadcast ? $0 == 15 : (0...14).contains($0) }) else {
             return AcquisitionResult(snapshot: await snapshot(), stopConfirmed: false, failure: "采集配置无效或已有通信任务")
         }
         currentRun = config.runID
-        telemetry = [:]; elapsed = 0; actualFrequency = 0
+        telemetry = [:]; stats = LinkStatistics(); elapsed = 0; actualFrequency = 0; transmitFrequency = 0
         let started = ContinuousClock.now
-        let period = Duration.seconds(1 / config.frequency)
-        var deadline = started
-        var rateStarted = started
-        var rateFrames = 0
-        var tick = 0
-        var misses: [Int: Int] = [:]
+        let frequency = (try? ControlFrequency.normalized(config.frequency)) ?? 0
+        // SDK frequency 0 pauses transmission; it is not an unbounded send rate.
+        let period = Duration.seconds(frequency > 0 ? 1 / frequency : 0.01)
+        var ids = config.ids
         var failure: String?
-        // UI refresh cadence is unrelated to this serial startup handshake.
-        // Broadcast has no ACK and cannot establish that every recipient is ready.
+        var terminalSample: Sample?
+        let streaming = !config.demo && (config.asynchronous || config.broadcast)
+        var streamStarted = false
         do {
             try Task.checkCancellation()
             for id in config.ids {
                 let command = config.commands[id] ?? MotorCommand(id: id)
-                guard command.id == id else { throw MotorError.invalid("控制 ID 与本次通信配置不一致") }
+                guard command.id == id else { throw MotorError.invalid("控制 ID 不一致") }
                 _ = try command.encode()
             }
             if !config.demo {
-                guard !config.broadcast else {
-                    throw MotorError.invalid("广播无法逐台确认超时锁存已清除及保护已恢复；请使用勾选 ID 的统一控制")
+                if config.broadcast && frequency > 0 {
+                    ids = try await session.detectOnlineIDs()
+                    guard !ids.isEmpty else { throw MotorError.invalid("未检测到可确认的电机，未发送广播控制") }
                 }
-                // Total bus frequency is shared by all IDs. Leave margin below the 1 s watchdog.
-                guard Double(Set(config.ids).count) / config.frequency < 0.5 else {
-                    throw MotorError.invalid("单台轮询间隔必须小于 0.5 秒；请提高总线频率或减少电机数量")
+                if frequency > 0 {
+                    // Frequency counts total control transmissions, as in the SDK.
+                    guard config.broadcast || Double(ids.count) / frequency < 0.5 else {
+                        throw MotorError.invalid("单台轮询间隔必须小于 0.5 秒；请提高频率或减少电机数量")
+                    }
+                    let feedback = try await session.prepareForControl(ids: ids)
+                    for reply in feedback { telemetry[reply.id] = Sample(reply) }
+                    if streaming { try await session.startStream(ids: ids); streamStarted = true }
                 }
-                let feedback = try await session.prepareForControl(ids: config.ids)
-                for reply in feedback { telemetry[reply.id] = Sample(reply) }
                 stats = await session.statistics
-                lastTX = try MotorCommand(id: feedback.last!.id).encode().hex
             }
         } catch is CancellationError { }
         catch { failure = error.localizedDescription }
-        // Start the communication schedule after the handshake, not at the UI click.
-        deadline = .now; rateStarted = deadline
+        var deadline = ContinuousClock.now
+        var monitorDeadline = deadline
+        var rateStarted = deadline
+        var previousSent = stats.sent, previousReceived = stats.received
+        var tick = 0, monitorTick = 0
+        var misses: [Int: Int] = [:]
+        let monitorPeriod = Duration.seconds(0.1 / Double(max(1, ids.count)))
+
+        func command(_ id: Int) throws -> MotorCommand {
+            var value = commandMailbox.command(for: id, runID: config.runID, fallback: config.commands[id] ?? MotorCommand(id: id))
+            guard value.id == id else { throw MotorError.invalid("控制 ID 不一致") }
+            value.timeoutProtection = true
+            return try value.clamped()
+        }
+        func sampleFailure(_ sample: Sample, _ command: MotorCommand) -> String? {
+            if sample.error != 0 || sample.timedOut { return "ID \(sample.motorID) 报告故障或超时保护，已请求停止" }
+            if sample.mode != command.mode.rawValue { return "ID \(sample.motorID) 反馈模式与指令不一致，已请求停止" }
+            return nil
+        }
         while failure == nil && !Task.isCancelled {
-            let id = config.ids[tick % config.ids.count]
-            var command = commandMailbox.command(for: id, runID: config.runID, fallback: config.commands[id] ?? MotorCommand(id: id))
-            command.timeoutProtection = true
+            var received: [(MotorFeedback, MotorCommand)] = []
+            var expiredIDs: [Int] = []
             do {
                 try Task.checkCancellation()
-                guard command.id == id else { throw MotorError.invalid("控制 ID 与本次通信配置不一致") }
-                let encoded = try command.encode()
-                if config.broadcast {
-                    if config.demo { stats.sent += 1 }
-                    else { try await session.broadcast(command); stats = await session.statistics }
-                } else {
-                    var sample: Sample
-                    if config.demo {
-                        sample = Sample(demoID: id, time: .now, phase: seconds(started.duration(to: .now)) * 0.46 + Double(id))
-                        sample.mode = command.mode.rawValue
-                        stats.sent += 1; stats.received += 1
-                    } else if config.asynchronous {
-                        try await session.beginAsync(command)
-                        var feedback: MotorFeedback?
-                        while feedback == nil {
-                            try Task.checkCancellation()
-                            feedback = try await session.receiveAsync()
-                            if feedback == nil { try await Task.sleep(for: .microseconds(200)) }
-                        }
-                        sample = Sample(feedback!); stats = await session.statistics
-                    } else {
-                        sample = Sample(try await session.exchange(command)); stats = await session.statistics
-                    }
-                    sample.command = command.converted(to: .output); sample.commandFrequency = config.frequency
-                    telemetry[id] = sample
-                    if sample.error != 0 || sample.timedOut {
-                        throw MotorError.serial("ID \(id) 报告\(sample.error != 0 ? "故障" : "超时保护")，已请求停止")
-                    }
-                    guard sample.mode == command.mode.rawValue else {
-                        throw MotorError.serial("ID \(id) 反馈模式 \(sample.mode) 与指令 \(command.mode.rawValue) 不一致，已请求停止")
-                    }
-                    sample.raw = ""
-                    await recordings.append(sample)
-                    misses[id] = 0
+                if streamStarted {
+                    let update = try await session.pollStream()
+                    received = update.feedback.map { ($0.feedback, $0.command) }
+                    expiredIDs = update.expiredIDs
                 }
-                lastTX = encoded.hex
-                rateFrames += 1
-            } catch is CancellationError { break }
-            catch {
+                for (feedback, sentCommand) in received {
+                    var sample = Sample(feedback)
+                    sample.command = sentCommand.converted(to: .output); sample.commandFrequency = frequency
+                    telemetry[sample.motorID] = sample
+                    if let reason = sampleFailure(sample, sentCommand) { terminalSample = sample; throw MotorError.serial(reason) }
+                    sample.raw = ""; await recordings.append(sample); misses[sample.motorID] = 0
+                }
+                for id in expiredIDs {
+                    misses[id, default: 0] += 1
+                    if misses[id, default: 0] >= 3 { throw MotorError.serial("ID \(id) 连续反馈超时，已请求停止") }
+                }
+                if config.broadcast && streamStarted && ContinuousClock.now >= monitorDeadline {
+                    let id = ids[monitorTick % ids.count]
+                    var check = try command(15); check.id = id
+                    try await session.sendStream(check)
+                    lastTX = try check.encode().hex
+                    monitorTick += 1; monitorDeadline = .now + monitorPeriod
+                }
+                if frequency > 0 && ContinuousClock.now >= deadline {
+                    let id = config.broadcast ? 15 : ids[tick % ids.count]
+                    let value = try command(id)
+                    if config.demo {
+                        stats.sent += 1
+                        if !config.broadcast {
+                            var sample = Sample(demoID: id, time: .now, phase: seconds(started.duration(to: .now)) * 0.46 + Double(id))
+                            sample.mode = value.mode.rawValue; sample.command = value.converted(to: .output); sample.commandFrequency = frequency
+                            telemetry[id] = sample; stats.received += 1; await recordings.append(sample)
+                        }
+                    } else if config.broadcast {
+                        try await session.broadcast(value)
+                    } else if streaming {
+                        try await session.sendStream(value)
+                    } else {
+                        do {
+                            var sample = Sample(try await session.exchange(value))
+                            sample.command = value.converted(to: .output); sample.commandFrequency = frequency
+                            telemetry[id] = sample
+                            if let reason = sampleFailure(sample, value) { terminalSample = sample; throw MotorError.serial(reason) }
+                            sample.raw = ""; await recordings.append(sample); misses[id] = 0
+                        } catch MotorError.timeout {
+                            misses[id, default: 0] += 1
+                            if misses[id, default: 0] >= 3 { throw MotorError.timeout }
+                        }
+                    }
+                    lastTX = try value.encode().hex
+                    tick += 1; deadline += period
+                    if deadline <= .now { deadline = .now + period }
+                }
                 if !config.demo { stats = await session.statistics }
-                if case MotorError.timeout = error, misses[id, default: 0] < 2 { misses[id, default: 0] += 1 }
-                else { failure = error.localizedDescription; break }
-            }
-            let now = ContinuousClock.now
-            elapsed = seconds(started.duration(to: now))
-            let rateWindow = seconds(rateStarted.duration(to: now))
-            if rateWindow >= 0.5 {
-                actualFrequency = Double(rateFrames) / rateWindow; rateFrames = 0; rateStarted = now
-            }
-            tick += 1
-            deadline += period
-            // Skip missed deadlines instead of producing a burst of catch-up commands.
-            if deadline <= now { deadline = now + period }
-            do { try await Task.sleep(until: deadline, clock: .continuous) }
-            catch { break }
+                elapsed = seconds(started.duration(to: .now))
+                let duration = seconds(rateStarted.duration(to: .now))
+                if duration >= 0.5 {
+                    transmitFrequency = Double(stats.sent - previousSent) / duration
+                    actualFrequency = Double(stats.received - previousReceived) / duration
+                    previousSent = stats.sent; previousReceived = stats.received; rateStarted = .now
+                }
+                if streaming && frequency > 0 { try await Task.sleep(for: .microseconds(100)) }
+                else { try await Task.sleep(until: frequency > 0 ? deadline : .now + .milliseconds(10), clock: .continuous) }
+            } catch is CancellationError { break }
+            catch { failure = error.localizedDescription; break }
         }
-        // Cancellation of acquisition must never cancel the Stop exchange itself.
-        let known = Array(Set(config.ids.filter { $0 < 15 }).union(telemetry.keys))
+        let known = Array(Set(ids.filter { $0 < 15 }).union(telemetry.keys))
         let session = session
         let confirmed: Bool
         if config.demo { confirmed = true }
         else {
-            confirmed = await Task.detached(priority: .userInitiated) {
-                await session.cancelAsync()
-                return await session.stop(ids: known)
-            }.value
+            confirmed = await Task.detached(priority: .userInitiated) { await session.stop(ids: known) }.value
             stats = await session.statistics
         }
+        if var sample = terminalSample { sample.raw = ""; await recordings.append(sample) }
         elapsed = seconds(started.duration(to: .now))
         let result = AcquisitionResult(snapshot: await snapshot(), stopConfirmed: confirmed, failure: failure)
         currentRun = nil
         return result
     }
+
 }
 private func seconds(_ duration: Duration) -> Double {
     Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18

@@ -150,6 +150,8 @@ struct ToolsPage: View {
             toolButton("复位电机", symbol: "arrow.clockwise", operation: .restart)
             Divider().opacity(0.3)
             toolButton("进入 Bootloader", symbol: "internaldrive", operation: .enterBootloader)
+            Button("临时关闭引导…") { review(.temporaryBoot) }
+                .buttonStyle(ActionStyle()).disabled(!available)
             toolButton("执行引导切换", symbol: "arrow.triangle.2.circlepath", operation: .switchBoot)
             HStack {
                 Button("开启自动引导") { review(.automaticBoot(true)) }
@@ -176,14 +178,17 @@ struct ToolsPage: View {
             HStack {
                 Text(model.maintenanceStage).font(.system(size: 12)).foregroundStyle(model.maintenanceFailed ? .orange : StudioTheme.mint)
                 Spacer()
-                Text("\(Int(model.maintenanceProgress * 100))%").font(.system(size: 20, weight: .light, design: .rounded)).monospacedDigit()
+                if !model.temporaryBootActive {
+                    Text("\(Int(model.maintenanceProgress * 100))%").font(.system(size: 20, weight: .light, design: .rounded)).monospacedDigit()
+                }
             }
-            ProgressView(value: model.maintenanceProgress).tint(model.maintenanceFailed ? .orange : StudioTheme.mint)
+            if model.temporaryBootActive { ProgressView().controlSize(.small) }
+            else { ProgressView(value: model.maintenanceProgress).tint(model.maintenanceFailed ? .orange : StudioTheme.mint) }
             if model.state == .maintaining {
                 HStack {
                     Text("正在独占设备连接，请保持供电。").font(.system(size: 10)).foregroundStyle(.secondary)
                     Spacer()
-                    Button("中止操作") { model.cancelMaintenance() }.buttonStyle(ActionStyle())
+                    Button(model.temporaryBootActive ? "退出临时引导" : "中止操作") { model.cancelMaintenance() }.buttonStyle(ActionStyle())
                 }
             }
             if model.maintenanceFailed {
@@ -224,7 +229,7 @@ struct ToolsPage: View {
     }
     private var pendingIsBusOperation: Bool {
         guard let pending else { return false }
-        switch pending { case .scanIDs, .repairDuplicateIDs, .reorderIDs: return true; default: return false }
+        switch pending { case .scanIDs, .repairDuplicateIDs, .reorderIDs, .temporaryBoot: return true; default: return false }
     }
     private var reviewDescription: String {
         guard let pending else { return "" }
@@ -238,8 +243,9 @@ struct ToolsPage: View {
         case .calibrate(let c): return c.mode == .limits ? String(format: "写入限位 A %.4f rad、行程 %.4f rad，%@坐标。请确认电机当前位于限位 A。", c.position, c.travel, c.forward ? "正向" : "反向") : "写入\(c.mode.rawValue)设置，并检查设备回读。"
         case .automaticBoot(let enabled): return enabled ? "保存自动引导开启设置，使电机上电后进入应用。" : "保存自动引导关闭设置，电机上电后可能停留在 Bootloader，普通控制暂不可用。"
         case .enterBootloader: return "复位设备并临时保持 Bootloader，用于更新或恢复固件。"
+        case .temporaryBoot: return "停止并复位整条总线，持续发送临时关闭引导指令。请重新给电机上电，观察设备进入引导状态后点击退出。退出仅停止发送，不保存自动引导配置，也不自动启动电机。"
         case .switchBoot: return "执行原 SDK 的 Swmotor 引导切换指令，结果取决于设备当前引导配置。"
-        case .restart: return "复位当前电机，随后验证停止模式反馈。"
+        case .restart: return "复位当前电机，确认设备先离线，再恢复正常停止反馈。"
         default: return "向当前电机执行操作并检查返回结果。"
         }
     }

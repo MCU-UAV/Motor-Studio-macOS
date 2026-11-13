@@ -80,32 +80,68 @@ public struct MotorCommand: Sendable, Equatable {
         return result
     }
 
-    public func encode() throws -> [UInt8] {
-        guard (0...15).contains(id) else { throw MotorError.invalid("ID 必须为 0–15；15 为广播") }
+    private var rawValues: [Double] {
         let r = side == .output ? ServoProtocol.ratio : 1.0
-        let output = converted(to: .output)
-        let values = [output.torque, output.speed, output.position, output.kp, output.kd]
-        let limits: [(Double, Double)] = [(-36.9093, 36.908174), (-278.90143, 278.90143),
-            (-1428.018898, 1428.018898), (0, 2128.523254), (0, 21.285233)]
-        for (value, limit) in zip(values, limits) {
-            guard value.isFinite && value >= limit.0 && value <= limit.1 else {
-                throw MotorError.invalid("控制参数超出协议范围或不是有限数字")
-            }
+        return [torque * 256000 / r, speed * (2.56 / (2 * .pi)) * r,
+                position * (32768 / (2 * .pi)) * r,
+                kp * 1280000 / r / r, kd * 128000000 / r / r]
+    }
+    private func validatedRaw() throws -> [Double] {
+        guard (0...15).contains(id), [torque, speed, position, kp, kd].allSatisfy({ $0.isFinite }) else {
+            throw MotorError.invalid("ID 或控制数字无效")
         }
-        guard mode != .stop || values.allSatisfy({ $0 == 0 }) else {
+        guard mode != .stop || [torque, speed, position, kp, kd].allSatisfy({ $0 == 0 }) else {
             throw MotorError.invalid("停止模式的控制参数必须为零")
         }
-        // Truncate toward zero, verified against the packaged SDK; do not round.
-        let raw = [torque * 256000 / r, speed * (2.56 / (2 * .pi)) * r,
-                   position * (32768 / (2 * .pi)) * r,
-                   kp * 1280000 / r / r, kd * 128000000 / r / r]
+        return rawValues.enumerated().map { index, value in
+            let lower = index == 2 ? Double(Int32.min) : Double(Int16.min)
+            let upper = index == 2 ? Double(Int32.max) : Double(Int16.max)
+            return min(upper, max(lower, value))
+        }
+    }
+    /// SDK saturates the five raw signed fields before truncating, including gains.
+    public func clamped() throws -> Self {
+        let raw = try validatedRaw()
+        let original = rawValues
+        let r = side == .output ? ServoProtocol.ratio : 1.0
+        var result = self
+        if raw[0] != original[0] { result.torque = raw[0] / 256000 * r }
+        if raw[1] != original[1] { result.speed = raw[1] / (2.56 / (2 * .pi)) / r }
+        if raw[2] != original[2] { result.position = raw[2] / (32768 / (2 * .pi)) / r }
+        if raw[3] != original[3] { result.kp = raw[3] / 1280000 * r * r }
+        if raw[4] != original[4] { result.kd = raw[4] / 128000000 * r * r }
+        // Inverse scaling may land one ULP inside the boundary. Move outward
+        // until re-encoding yields the same saturated integer as the SDK.
+        let fields: [WritableKeyPath<Self, Double>] = [\.torque, \.speed, \.position, \.kp, \.kd]
+        for i in fields.indices where raw[i] != original[i] {
+            for _ in 0..<8 {
+                let reconstructed = result.rawValues[i]
+                if raw[i] > 0 ? reconstructed >= raw[i] : reconstructed <= raw[i] { break }
+                let value = result[keyPath: fields[i]]
+                result[keyPath: fields[i]] = raw[i] > 0 ? value.nextUp : value.nextDown
+            }
+        }
+        return result
+    }
+    public func encode() throws -> [UInt8] {
+        let raw = try validatedRaw()
         var bytes: [UInt8] = [0xfe, 0xee, UInt8(id | mode.rawValue << 4 | (timeoutProtection ? 128 : 0)), 0]
         for (index, value) in raw.enumerated() {
-            if index == 2 { ServoProtocol.append(Int32(clamping: Int64(value)), to: &bytes) }
-            else { ServoProtocol.append(Int16(clamping: Int64(value)), to: &bytes) }
+            if index == 2 { ServoProtocol.append(Int32(value), to: &bytes) }
+            else { ServoProtocol.append(Int16(value), to: &bytes) }
         }
         ServoProtocol.append(try ServoProtocol.crc(bytes), to: &bytes)
         return bytes
+    }
+
+}
+
+public enum ControlFrequency {
+    /// Windows SDK clamps the total bus target to 0...10000 Hz, then truncates.
+    /// Zero means paused transmission, not unlimited frequency.
+    public static func normalized(_ value: Double) throws -> Double {
+        guard value.isFinite else { throw MotorError.invalid("通信频率必须是有限数字") }
+        return min(10000, max(0, value)).rounded(.towardZero)
     }
 }
 
