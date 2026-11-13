@@ -43,6 +43,29 @@ private actor RecoveringScan: MaintenanceTransport {
     }
 }
 final class SessionTests: XCTestCase {
+    func testTemporaryBootOwnsSerialUntilCancelledAndReleasesLease() async throws {
+        let io = SimulatedSerial()
+        let session = SerialSession(io: io)
+        try await session.connect(path: "/dev/cu.test")
+        let task = Task { try await session.maintain(.temporaryBoot, id: 0) }
+        defer { task.cancel() }
+        for _ in 0..<100 {
+            if io.packets().filter({ $0[2] == 255 }).count > 10 { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertGreaterThan(io.packets().filter { $0[2] == 255 }.count, 10)
+        do { _ = try await session.exchange(MotorCommand()); XCTFail("Lease must exclude control") } catch { }
+        do { _ = try await session.maintain(.version, id: 0); XCTFail("Lease must exclude maintenance") } catch { }
+        task.cancel()
+        let result = try await task.value
+        XCTAssertTrue(result.message.contains("退出"))
+        let count = io.packets().count
+        try await Task.sleep(for: .milliseconds(10))
+        XCTAssertEqual(io.packets().count, count)
+        let connected = await session.isConnected
+        XCTAssertTrue(connected)
+        _ = try await session.exchange(MotorCommand())
+    }
     func testAsyncPartialReceiveExclusionAndStopBroadcastThenVerification() async throws {
         let io = SimulatedSerial()
         let link = SerialSession(io: io)
@@ -65,7 +88,7 @@ final class SessionTests: XCTestCase {
         let io = SimulatedSerial()
         let session = SerialSession(io: io)
         try await session.connect(path: "/dev/cu.test")
-        try await session.broadcast(MotorCommand(id: 15, mode: .foc, position: 0.1))
+        try await session.broadcast(MotorCommand(id: 15))
         let stats = await session.statistics
         XCTAssertEqual(stats.sent, 1); XCTAssertEqual(stats.received, 0); XCTAssertEqual(stats.timeouts, 0)
         do { _ = try await session.exchange(MotorCommand(id: 15)); XCTFail("Broadcast cannot receive") } catch { }

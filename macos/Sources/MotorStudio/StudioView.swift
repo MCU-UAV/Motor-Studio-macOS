@@ -245,7 +245,7 @@ struct ControlPanel: View {
             Toggle("广播控制全部电机", isOn: $model.broadcastControl)
                 .toggleStyle(.switch).controlSize(.mini).font(.system(size: 11)).disabled(model.busy)
             if model.broadcastControl {
-                Text("ID 15 · 只发送；总线上所有电机都会接收参数。")
+                Text("ID 15 · 全总线统一参数。启动前检测并确认保护；额外逐台监测约 10 Hz，发送统计包含监测帧。运行时请勿增接电机。")
                     .font(.system(size: 10)).foregroundStyle(.orange)
             }
             Picker("控制单位", selection: Binding(get: { model.displaySide }, set: { model.setControlSide($0) })) {
@@ -278,10 +278,14 @@ struct ControlPanel: View {
             VStack(spacing: 9) {
                 HStack {
                     Text("总线目标频率").foregroundStyle(.secondary)
-                    Spacer(); Text("\(Int(model.frequency)) Hz").monospacedDigit()
+                    Spacer()
+                    ControlNumberField(title: "通信频率", value: $model.frequency, appliesControl: false)
+                        .frame(width: 75).textFieldStyle(.roundedBorder).disabled(model.busy)
+                    Text("Hz")
                 }.font(.system(size: 10))
-                Slider(value: $model.frequency, in: 1...1000, step: 1).controlSize(.mini).disabled(model.busy)
+                Slider(value: $model.frequency, in: 0...10000, step: 1).controlSize(.mini).disabled(model.busy)
             }
+            Text("0 Hz 暂停发送 · 频率为总线发送目标").font(.system(size: 9)).foregroundStyle(.secondary)
             Label("控制期间保持超时保护", systemImage: "checkmark.shield")
                 .font(.system(size: 10)).foregroundStyle(StudioTheme.mint)
             Picker("输入方式", selection: $model.realtimeInput) {
@@ -328,6 +332,7 @@ private struct ControlNumberField: View {
     @Environment(StudioModel.self) private var model
     let title: String
     @Binding var value: Double
+    var appliesControl = true
     @State private var text = ""
     @FocusState private var focused: Bool
     var body: some View {
@@ -342,12 +347,13 @@ private struct ControlNumberField: View {
                 }
                 model.invalidControlFields.remove(title)
                 value = number
-                if model.realtimeInput { _ = model.applyDraft(quiet: true) }
+                if model.realtimeInput && appliesControl { _ = model.applyDraft(quiet: true) }
             }
             .onSubmit {
                 guard let number = Double(text), number.isFinite else { model.notice = "请输入有效数字"; return }
                 model.invalidControlFields.remove(title)
-                value = number; _ = model.applyDraft()
+                if appliesControl { value = number; _ = model.applyDraft() }
+                else { value = (try? ControlFrequency.normalized(number)) ?? value }
             }
             .overlay(alignment: .trailing) {
                 if model.invalidControlFields.contains(title) { Image(systemName: "exclamationmark.circle").foregroundStyle(.orange) }

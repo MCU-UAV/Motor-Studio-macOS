@@ -18,10 +18,9 @@ final class ProtocolTests: XCTestCase {
             XCTAssertEqual(try command.encode().hex.replacingOccurrences(of: " ", with: "").lowercased(), v.hex)
         }
     }
-    func testInvalidCommandsNeverWrapOrSilentlySaturate() throws {
+    func testInvalidCommandsNeverWrapOrAcceptNonFiniteNumbers() throws {
         for command in [MotorCommand(id: -1), MotorCommand(id: 16),
                         MotorCommand(mode: .foc, torque: .nan), MotorCommand(mode: .foc, position: .infinity),
-                        MotorCommand(mode: .foc, torque: 37), MotorCommand(mode: .foc, kp: -1),
                         MotorCommand(mode: .stop, speed: 1)] {
             XCTAssertThrowsError(try command.encode())
         }
@@ -75,6 +74,20 @@ final class ProtocolTests: XCTestCase {
         catch { XCTAssertTrue(error is MotorError) }
         do { _ = try await session.exchange(MotorCommand()); XCTFail("Must reject disconnected session") }
         catch { XCTAssertTrue(error is MotorError) }
+    }
+    func testSDKClampingInBothUnitsIncludingNegativeGains() throws {
+        struct LimitVector: Decodable { let side: String; let values: [Double]; let hex: String }
+        let url = Bundle.module.url(forResource:"limits-vectors",withExtension:"json",subdirectory:"Fixtures")!
+        let cases = try JSONDecoder().decode([LimitVector].self,from:Data(contentsOf:url))
+        XCTAssertEqual(cases.count,70)
+        for c in cases {
+            let v=c.values
+            let command=MotorCommand(mode:.foc,torque:v[0],speed:v[1],position:v[2],kp:v[3],kd:v[4],side:c.side.hasSuffix("Rotor") ? .rotor:.output)
+            XCTAssertEqual(try command.encode().hex.replacingOccurrences(of:" ",with:"").lowercased(),c.hex)
+            let limited=try command.clamped()
+            XCTAssertTrue([limited.torque,limited.speed,limited.position,limited.kp,limited.kd].allSatisfy{$0.isFinite})
+            XCTAssertEqual(try limited.encode(),try command.encode(), "Displayed clamped target must reproduce the wire value")
+        }
     }
     private func feedback() throws -> [UInt8] {
         var bytes: [UInt8] = [0xfc, 0xee, 0x13, 0xfb, 200, 200]

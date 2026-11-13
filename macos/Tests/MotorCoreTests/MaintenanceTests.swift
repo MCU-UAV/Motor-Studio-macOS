@@ -29,6 +29,7 @@ private actor SDKTransport: MaintenanceTransport {
     var baud = 6_000_000
     var registers: [Int: UInt8] = [4: 0, 5: 1, 14: 60]
     var currentID = 0
+    var resetPending = false
     let failure: String
     init(_ failure: String = "") throws { vectors = try fixtures(); self.failure = failure }
     func setBaud(_ baud: Int) async throws { self.baud = baud }
@@ -36,8 +37,10 @@ private actor SDKTransport: MaintenanceTransport {
         try Task.checkCancellation(); packets.append(b)
         let id = Int(b[2] & 15)
         if b[2] >> 4 != 15 {
+            if b[2] >> 4 == 7 { resetPending = true }
             if b[2] >> 4 == 0 && id != 15 {
                 if id != currentID && failure != "occupied" { throw MotorError.timeout }
+                if resetPending { resetPending = false; throw MotorError.timeout }
                 if failure == "faultStop" {
                     var bad = try feedback(id); bad[14] = 4
                     return try appendCRC(Array(bad.prefix(22)))
@@ -56,6 +59,7 @@ private actor SDKTransport: MaintenanceTransport {
             }
             return response
         }
+        resetPending = false
         let command = Int(b[5] & 15), code = Int(b[5] >> 4)
         let location = Int(ServoProtocol.read16(b, 6)), address = location & 0x3fff, sector = location >> 14
         if failure == "timeout", command == 0, address == 32 { throw MotorError.timeout }
@@ -186,7 +190,7 @@ final class MaintenanceTests: XCTestCase {
         let t = try SDKTransport()
         _ = try await controller(t).run(.restart, id: 0)
         let frames = await t.packets
-        XCTAssertEqual(frames.map { $0[2] }, [15, 0x70, 0])
+        XCTAssertEqual(frames.map { $0[2] }, [15, 0x70, 0, 0])
         let bad = try SDKTransport("faultStop")
         do { _ = try await controller(bad).run(.restart, id: 0); XCTFail("Fault cannot confirm restart") } catch { }
     }

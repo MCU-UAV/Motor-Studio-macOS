@@ -96,7 +96,7 @@ actor RecordingStore {
         return try await Task.detached(priority: .utility) {
             let header = "timestamp,motor_id,position_rad,speed_rad_s,torque_Nm,voltage_V,shell_C,winding_C,error,warning,timed_out,mode,demo,encoder_rad,target_position_rad,target_speed_rad_s,target_torque_Nm,kp_Nm_rad,kd_Nm_per_rad_s,target_bus_Hz"
             let lines = snapshot.sorted { $0.time < $1.time }.map { s in
-                [s.time.formatted(.iso8601), String(s.motorID), String(s.position), String(s.speed), String(s.torque),
+                [Self.csvTimestamp(s.time), String(s.motorID), String(s.position), String(s.speed), String(s.torque),
                  String(s.voltage), String(s.temperature), String(s.windingTemperature), String(s.error),
                  String(s.warning), String(s.timedOut), String(s.mode), String(s.demo), String(s.encoderPosition),
                  String(s.command.position), String(s.command.speed), String(s.command.torque), String(s.command.kp),
@@ -105,5 +105,14 @@ actor RecordingStore {
             try (header + "\n" + lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
             return snapshot.count
         }.value
+    }
+    nonisolated static func csvTimestamp(_ date: Date) -> String {
+        // Round before splitting: Foundation's fractional formatting can truncate
+        // binary Date values just below a millisecond into duplicate timestamps.
+        let milliseconds = Int64((date.timeIntervalSince1970 * 1000).rounded())
+        let seconds = milliseconds >= 0 ? milliseconds / 1000 : (milliseconds - 999) / 1000
+        let fraction = Int(milliseconds - seconds * 1000)
+        let whole = Date(timeIntervalSince1970: Double(seconds)).formatted(.iso8601)
+        return String(whole.dropLast()) + String(format: ".%03dZ", fraction)
     }
 }

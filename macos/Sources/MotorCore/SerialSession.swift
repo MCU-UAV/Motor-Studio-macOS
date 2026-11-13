@@ -9,12 +9,23 @@ public struct LinkStatistics: Sendable {
     public init() {}
 }
 
+public struct StreamFeedback: Sendable {
+    public let feedback: MotorFeedback
+    public let command: MotorCommand
+}
+public struct StreamUpdate: Sendable {
+    public let feedback: [StreamFeedback]
+    public let expiredIDs: [Int]
+}
+
 /// Owns the descriptor; the actor serializes requests, stop commands and close.
 public actor SerialSession {
     private var fd: Int32 = -1
     private var parser = FrameParser()
     private var maintenanceLease: UUID?
     private var pending: (id: Int, deadline: ContinuousClock.Instant)?
+    private var streamIDs: Set<Int> = []
+    private var streamPending: [(command: MotorCommand, deadline: ContinuousClock.Instant)] = []
     private var protectedFeedbackAt: [Int: ContinuousClock.Instant] = [:]
     private let now: @Sendable () -> ContinuousClock.Instant
     public private(set) var statistics = LinkStatistics()
@@ -47,7 +58,7 @@ public actor SerialSession {
         guard maintenanceLease == nil else { throw MotorError.serial("设备维护中，串口由配置流程独占") }
         guard fd >= 0 else { throw MotorError.serial("串口未连接") }
         guard command.id != 15 else { throw MotorError.invalid("广播只发送，不等待单电机反馈") }
-        guard pending == nil else { throw MotorError.serial("异步请求尚未完成") }
+        guard pending == nil, streamIDs.isEmpty else { throw MotorError.serial("异步请求尚未完成") }
         let bytes = try command.encode()
         if command.mode == .foc { try requireFreshControl(id: command.id) }
         if cancellable { try Task.checkCancellation() }
@@ -81,7 +92,7 @@ public actor SerialSession {
         guard !ids.isEmpty, ids.allSatisfy({ (0...14).contains($0) }) else {
             throw MotorError.invalid("启动确认需要逐台 ID（0–14）；广播没有确认应答")
         }
-        guard fd >= 0, maintenanceLease == nil, pending == nil else {
+        guard fd >= 0, maintenanceLease == nil, pending == nil, streamIDs.isEmpty else {
             throw MotorError.serial("启动确认要求已连接且没有进行中的通信或维护")
         }
         var confirmed: [MotorFeedback] = []
@@ -142,6 +153,12 @@ public actor SerialSession {
         guard command.id == 15, fd >= 0, maintenanceLease == nil, pending == nil else {
             throw MotorError.serial("广播要求已连接、无维护或未完成的异步请求")
         }
+        if command.mode == .foc {
+            guard command.timeoutProtection, !streamIDs.isEmpty else {
+                throw MotorError.invalid("广播控制需要逐台完成保护确认并持续监测反馈")
+            }
+            for id in streamIDs { try requireFreshControl(id: id) }
+        }
         let bytes = try command.encode()
         let count = io.write(fd, bytes: bytes, timeout: 40)
         guard count == bytes.count else { throw MotorError.serial("广播发送失败") }
@@ -151,7 +168,7 @@ public actor SerialSession {
     /// Separate sending and receiving without blocking the actor on the response deadline.
     /// One in-flight frame is required on this half-duplex protocol (no transaction IDs).
     public func beginAsync(_ command: MotorCommand, timeout: Duration = .milliseconds(40)) throws {
-        guard fd >= 0, maintenanceLease == nil, pending == nil, command.id != 15 else {
+        guard fd >= 0, maintenanceLease == nil, pending == nil, streamIDs.isEmpty, command.id != 15 else {
             throw MotorError.serial("异步通信状态无效")
         }
         let bytes = try command.encode()
@@ -180,7 +197,77 @@ public actor SerialSession {
         }
         return nil
     }
-    public func cancelAsync() { pending = nil; parser.clearPartialFrame() }
+    public func cancelAsync() { pending = nil; streamIDs = []; streamPending = []; parser.clearPartialFrame() }
+
+    /// Streaming sends are paced independently of replies. Never flush between
+    /// frames: delayed/fragmented responses must remain available to the receiver.
+    public func startStream(ids: [Int]) throws {
+        guard fd >= 0, maintenanceLease == nil, pending == nil, streamIDs.isEmpty,
+              !ids.isEmpty, ids.allSatisfy({ (0...14).contains($0) }) else { throw MotorError.serial("异步流状态无效") }
+        guard io.flush(fd) else { throw MotorError.serial("串口已断开") }
+        parser.clearPartialFrame(); streamPending = []; streamIDs = Set(ids)
+    }
+    public func sendStream(_ command: MotorCommand, timeout: Duration = .milliseconds(40)) throws {
+        guard fd >= 0, maintenanceLease == nil, streamIDs.contains(command.id), streamPending.count < 512 else {
+            throw MotorError.serial("异步流已失效或待接收队列已满")
+        }
+        try Task.checkCancellation()
+        guard command.timeoutProtection else { throw MotorError.invalid("异步控制必须开启超时保护") }
+        if command.mode == .foc { try requireFreshControl(id: command.id) }
+        let bytes = try command.encode()
+        guard io.write(fd, bytes: bytes, timeout: 40) == bytes.count else { throw MotorError.serial("异步发送失败") }
+        statistics.sent += 1
+        streamPending.append((command, now() + timeout))
+    }
+    public func pollStream() throws -> StreamUpdate {
+        guard fd >= 0, maintenanceLease == nil, !streamIDs.isEmpty else { throw MotorError.serial("异步流未开始") }
+        try Task.checkCancellation()
+        var replies: [StreamFeedback] = []
+        // Expire before matching: an already overdue reply cannot refresh the
+        // protection lease. Same-ID replies still lack transaction identifiers.
+        let instant = now()
+        let expired = streamPending.filter { $0.deadline <= instant }.map { $0.command.id }
+        streamPending.removeAll { $0.deadline <= instant }
+        let frames = parser.feed(try io.read(fd, capacity: 4096, timeout: 0))
+        statistics.badCRC = parser.badCRC
+        for frame in frames {
+            guard let index = streamPending.firstIndex(where: { $0.command.id == frame.id }) else {
+                statistics.wrongID += 1; continue
+            }
+            let request = streamPending.remove(at: index)
+            statistics.received += 1; recordProtectedFeedback(frame)
+            replies.append(StreamFeedback(feedback: frame, command: request.command))
+        }
+        statistics.timeouts += expired.count
+        return StreamUpdate(feedback: replies, expiredIDs: expired)
+    }
+
+    /// Application-mode discovery does not reset devices or change their IDs.
+    public func detectOnlineIDs() throws -> [Int] {
+        try detectOnlineMotors().map(\.id)
+    }
+    public func detectOnlineMotors() throws -> [MotorFeedback] {
+        guard fd >= 0, maintenanceLease == nil, pending == nil, streamIDs.isEmpty else {
+            throw MotorError.serial("请连接串口并停止通信再检测电机")
+        }
+        protectedFeedbackAt = [:]
+        var replies: [MotorFeedback] = []
+        for id in 0...14 {
+            try Task.checkCancellation()
+            let badBefore = statistics.badCRC, wrongBefore = statistics.wrongID, noiseBefore = parser.discardedBytes
+            do {
+                replies.append(try exchange(MotorCommand(id: id), timeout: .milliseconds(10)))
+            } catch MotorError.timeout {
+                if statistics.badCRC != badBefore || statistics.wrongID != wrongBefore || parser.discardedBytes != noiseBefore || !parser.buffer.isEmpty {
+                    throw MotorError.collision
+                }
+            }
+            if statistics.badCRC != badBefore || statistics.wrongID != wrongBefore || parser.discardedBytes != noiseBefore || !parser.buffer.isEmpty {
+                throw MotorError.collision
+            }
+        }
+        return replies
+    }
 
     public func stop(ids: [Int]) -> Bool {
         cancelAsync()
@@ -202,12 +289,12 @@ public actor SerialSession {
     }
     public func disconnect() {
         guard maintenanceLease == nil else { return }
-        pending = nil; protectedFeedbackAt = [:]; io.close(fd); fd = -1
+        cancelAsync(); protectedFeedbackAt = [:]; io.close(fd); fd = -1
     }
 
     public func maintain(_ operation: MaintenanceOperation, id: Int,
                          progress: @escaping @Sendable (MaintenanceProgress) -> Void = { _ in }) async throws -> MaintenanceResult {
-        guard fd >= 0, maintenanceLease == nil, pending == nil else { throw MotorError.serial("串口未连接或正在维护") }
+        guard fd >= 0, maintenanceLease == nil, pending == nil, streamIDs.isEmpty else { throw MotorError.serial("串口未连接或正在维护") }
         let lease = UUID()
         maintenanceLease = lease
         protectedFeedbackAt = [:]
@@ -285,7 +372,7 @@ public actor SerialSession {
 
     fileprivate func maintenanceBaud(_ baud: Int, lease: UUID) throws {
         guard fd >= 0, maintenanceLease == lease else { throw MotorError.serial("串口维护会话已失效") }
-        guard io.setBaud(fd, baud: baud) else { throw MotorError.serial("设备已保存新速率，但主机切换失败；请重新连接并选择新波特率") }
+        guard io.setBaud(fd, baud: baud) else { throw MotorError.serial("主机切换到 \(baud) bps 失败；请确认设备当前速率后重新连接") }
         connectedBaud = baud
     }
 }
@@ -293,6 +380,7 @@ public actor SerialSession {
 private struct LeasedTransport: MaintenanceTransport {
     let session: SerialSession
     let lease: UUID
+    func currentBaud() async -> Int { await session.baud }
     func transact(_ bytes: [UInt8], responseLength: Int, timeout: Duration) async throws -> [UInt8] {
         try await session.maintenanceTransfer(bytes, responseLength: responseLength, timeout: timeout, lease: lease)
     }

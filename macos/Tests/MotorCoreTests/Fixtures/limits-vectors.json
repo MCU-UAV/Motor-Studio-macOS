@@ -1,0 +1,842 @@
+[
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      -1e+300,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000008000000000000000000000194b1ef3"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      -100000000.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000008000000000000000000000194b1ef3"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      -1,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900089fc00000000000000000000cc60399c"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000000ee08c88f"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      1,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000770300000000000000000000bfdae294"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      100000000.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000ff7f000000000000000000000c5bc509"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      1e+300,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000ff7f000000000000000000000c5bc509"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      -1e+300,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000080000000000000000037adfa79"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      -100000000.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000080000000000000000037adfa79"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      -1,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000008bff0000000000000000f11baaf7"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000000ee08c88f"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      1,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee90000000750000000000000000002bd841fd"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      100000000.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee90000000ff7f000000000000000003e9bd8a"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      1e+300,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee90000000ff7f000000000000000003e9bd8a"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      -1e+300,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000008000000000dd5dc8f6"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      -100000000.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000008000000000dd5dc8f6"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      -1,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000000b40de9ff000000001af5a5a6"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000000ee08c88f"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      1,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000004cf216000000000057654234"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      100000000.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000000ffffff7f0000000084e6cc9f"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      1e+300,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000000ffffff7f0000000084e6cc9f"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      -1e+300,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000000000000000080000076d0440d"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      -100000000.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000000000000000080000076d0440d"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      -1,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee90000000000000000000f1ff000099cc0e4c"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000000ee08c88f"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      1,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000000000000000f00000053b587b7"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      100000000.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee90000000000000000000ff7f00000bb40cf2"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      1e+300,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee90000000000000000000ff7f00000bb40cf2"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      -1e+300
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000080f3352e29"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      -100000000.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000080f3352e29"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      -1
+    ],
+    "rc": 0,
+    "hex": "feee900000000000000000000000fdf93a8cda74"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000000ee08c88f"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000306bb994e4d"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      100000000.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000000000000000000ff7ff58c6211"
+  },
+  {
+    "side": "Set_Control_Data_Out",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1e+300
+    ],
+    "rc": 0,
+    "hex": "feee900000000000000000000000ff7ff58c6211"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      -1e+300,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000008000000000000000000000194b1ef3"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      -100000000.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000008000000000000000000000194b1ef3"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      -1,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000008000000000000000000000194b1ef3"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000000ee08c88f"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      1,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000ff7f000000000000000000000c5bc509"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      100000000.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000ff7f000000000000000000000c5bc509"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      1e+300,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000ff7f000000000000000000000c5bc509"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      -1e+300,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000080000000000000000037adfa79"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      -100000000.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000080000000000000000037adfa79"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      -1,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000000ee08c88f"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000000ee08c88f"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      1,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000000ee08c88f"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      100000000.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee90000000ff7f000000000000000003e9bd8a"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      1e+300,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee90000000ff7f000000000000000003e9bd8a"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      -1e+300,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000008000000000dd5dc8f6"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      -100000000.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000008000000000dd5dc8f6"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      -1,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000000a1ebffff00000000ad0a324a"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000000ee08c88f"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      1,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000005f1400000000000079d63b6a"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      100000000.0,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000000ffffff7f0000000084e6cc9f"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      1e+300,
+      0.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000000ffffff7f0000000084e6cc9f"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      -1e+300,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000000000000000080000076d0440d"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      -100000000.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000000000000000080000076d0440d"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      -1,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000000000000000080000076d0440d"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000000ee08c88f"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      1,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee90000000000000000000ff7f00000bb40cf2"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      100000000.0,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee90000000000000000000ff7f00000bb40cf2"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      1e+300,
+      0.0
+    ],
+    "rc": 0,
+    "hex": "feee90000000000000000000ff7f00000bb40cf2"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      -1e+300
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000080f3352e29"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      -100000000.0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000080f3352e29"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      -1
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000080f3352e29"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0
+    ],
+    "rc": 0,
+    "hex": "feee9000000000000000000000000000ee08c88f"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1
+    ],
+    "rc": 0,
+    "hex": "feee900000000000000000000000ff7ff58c6211"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      100000000.0
+    ],
+    "rc": 0,
+    "hex": "feee900000000000000000000000ff7ff58c6211"
+  },
+  {
+    "side": "Set_Control_Data_Rotor",
+    "values": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1e+300
+    ],
+    "rc": 0,
+    "hex": "feee900000000000000000000000ff7ff58c6211"
+  }
+]
