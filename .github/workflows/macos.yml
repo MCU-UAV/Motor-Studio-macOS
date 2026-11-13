@@ -1,0 +1,21 @@
+name: Native macOS
+on:
+  workflow_dispatch:
+  push:
+    paths: ['macos/**', '.github/workflows/macos.yml']
+  pull_request:
+    paths: ['macos/**', '.github/workflows/macos.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test native universal app
+        run: bash macos/scripts/build-app.sh --universal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Motor-Studio-Performance-macOS
+          path: macos/dist/Motor-Studio-Performance-macOS.zip
+          if-no-files-found: error

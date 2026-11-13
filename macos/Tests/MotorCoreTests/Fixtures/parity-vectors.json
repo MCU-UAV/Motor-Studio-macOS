@@ -1,0 +1,100 @@
+[
+  {
+    "operation": "scan",
+    "tx": "feee0f00000000000000000000000000929d7491",
+    "rx": "",
+    "timeout": 0
+  },
+  {
+    "operation": "scan",
+    "tx": "feee7f0000000000000000000000000025536c3f",
+    "rx": "",
+    "timeout": 0
+  },
+  {
+    "operation": "scan",
+    "tx": "feeeff00ff000400aaaaaaaaaaaaaaaa1a08c926",
+    "rx": "",
+    "timeout": 0
+  },
+  {
+    "operation": "scan",
+    "tx": "",
+    "rx": "00030e",
+    "timeout": 1000
+  },
+  {
+    "operation": "switch",
+    "tx": "feee0f00000000000000000000000000929d7491",
+    "rx": "",
+    "timeout": 0
+  },
+  {
+    "operation": "switch",
+    "tx": "feee7000000000000000000000000000378838d7",
+    "rx": "fcee701e233000000000000000000000000000000000410e458b",
+    "timeout": 0
+  },
+  {
+    "operation": "switch",
+    "tx": "feeef000f0050000aaaaaaaaaaaaaaaa959ffff7",
+    "rx": "fcee800500004f4b204154423100000000000000000058fc1461",
+    "timeout": 1000
+  },
+  {
+    "operation": "Set_Control_Data_Out",
+    "tx": "feee900008003a0093bc0500000000004d7cca2b",
+    "rx": "",
+    "timeout": 0,
+    "id": 0,
+    "values": [
+      0.01,
+      0.5,
+      0.25,
+      0.001,
+      0.0001
+    ]
+  },
+  {
+    "operation": "Set_Control_Data_Out",
+    "tx": "feee9f0008003a0093bc0500000000005fa79ec3",
+    "rx": "",
+    "timeout": 0,
+    "id": 15,
+    "values": [
+      0.01,
+      0.5,
+      0.25,
+      0.001,
+      0.0001
+    ]
+  },
+  {
+    "operation": "Set_Control_Data_Rotor",
+    "tx": "feee9000000a000017050000000500320d9ecaa4",
+    "rx": "",
+    "timeout": 0,
+    "id": 0,
+    "values": [
+      0.01,
+      0.5,
+      0.25,
+      0.001,
+      0.0001
+    ]
+  },
+  {
+    "operation": "Set_Control_Data_Rotor",
+    "tx": "feee9f00000a000017050000000500321f459e4c",
+    "rx": "",
+    "timeout": 0,
+    "id": 15,
+    "values": [
+      0.01,
+      0.5,
+      0.25,
+      0.001,
+      0.0001
+    ]
+  }
+]
