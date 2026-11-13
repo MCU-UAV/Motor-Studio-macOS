@@ -10,10 +10,30 @@ permissions:
 jobs:
   build:
     runs-on: macos-26
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Build and test native universal app
         run: bash macos/scripts/build-app.sh --universal
+      - name: Diagnose failed native tests
+        if: failure()
+        run: |
+          mkdir -p macos/build/diagnostics
+          xcrun swift --version > macos/build/diagnostics/toolchain.txt
+          bin_dir="$(cd macos && xcrun swift build --show-bin-path)"
+          xcrun lldb --batch -o run -k 'thread backtrace all' -- \
+            "$(xcrun --find xctest)" "$bin_dir/MotorStudioPackageTests.xctest" \
+            > macos/build/diagnostics/xctest-lldb.txt 2>&1 || true
+          bash macos/scripts/test-native-runtime.sh > macos/build/diagnostics/native-runtime.txt 2>&1 || true
+          if [[ -f macos/build/native-runtime-tests ]]; then
+            xcrun lldb --batch -o run -k 'thread backtrace all' -- macos/build/native-runtime-tests \
+              > macos/build/diagnostics/native-lldb.txt 2>&1 || true
+          fi
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: macOS-failure-diagnostics
+          path: macos/build/diagnostics
       - uses: actions/upload-artifact@v4
         with:
           name: Motor-Studio-Performance-macOS
