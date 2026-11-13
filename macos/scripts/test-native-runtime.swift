@@ -14,17 +14,25 @@ import MotorCore
         engine.commandMailbox.prepare(config)
         let loop = Task.detached { await engine.run(config) }
         try await Task.sleep(for: .milliseconds(100))
+        let baselineStart = await engine.snapshot()
+        try await Task.sleep(for: .milliseconds(700))
         let before = await engine.snapshot()
         // Intentionally block MainActor: acquisition must continue independently.
         await MainActor.run { Thread.sleep(forTimeInterval: 0.7) }
         let after = await engine.snapshot()
-        precondition(after.stats.received - before.stats.received >= 55, "Acquisition stalled with MainActor")
+        let baselineFrames = before.stats.received - baselineStart.stats.received
+        let blockedFrames = after.stats.received - before.stats.received
+        print("MainActor isolation: baseline \(baselineFrames), blocked \(blockedFrames) frames per 700 ms")
+        // Shared CI runners need not sustain 100 Hz. Compare equal windows on
+        // this host; moving acquisition onto MainActor still yields zero frames.
+        precondition(baselineFrames > 0 && blockedFrames > 0 && blockedFrames * 2 >= baselineFrames,
+                     "Acquisition stalled with MainActor")
         var newer = MotorCommand(id: 0, mode: .foc); newer.position = 0.8
         engine.commandMailbox.update([0:newer], runID: runID, revision: 2)
         engine.commandMailbox.update([0:MotorCommand(id:0)], runID: runID, revision: 1)
-        try await Task.sleep(for: .milliseconds(60))
-        let commandSnapshot = await engine.snapshot()
-        precondition(commandSnapshot.telemetry[0]?.command.position == 0.8)
+        try await waitFor("Latest command was not acquired; stale revision may have won") {
+            await engine.snapshot().telemetry[0]?.command.position == 0.8
+        }
         let stoppedAt = ContinuousClock.now
         loop.cancel(); let result = await loop.value
         let stopDuration = stoppedAt.duration(to: .now)
@@ -81,7 +89,10 @@ import MotorCore
         engine.commandMailbox.update([2: immediate], runID: restartID, revision: 1)
         engine.commandMailbox.update([2: MotorCommand(id: 2)], runID: runID, revision: 999)
         let restarted = Task.detached { await engine.run(restart) }
-        try await Task.sleep(for: .milliseconds(100)); restarted.cancel()
+        try await waitFor("Restart did not acquire the immediate command") {
+            await engine.snapshot().telemetry[2]?.command.position == 0.4
+        }
+        restarted.cancel()
         let restartedResult = await restarted.value
         precondition(restartedResult.failure == nil && restartedResult.stopConfirmed)
         precondition(Set(restartedResult.snapshot.telemetry.keys) == [2])
@@ -177,26 +188,27 @@ import MotorCore
         model.telemetry = [0:Sample(demoID:0,time:.now,phase:1)]
         precondition(!unrelatedInvalidated.value, "Telemetry invalidated navigation/controls")
         model.demo = true; model.connect()
-        try await Task.sleep(for: .milliseconds(80)); precondition(model.state == .ready)
+        try await waitFor("Demo connection did not become ready") { model.state == .ready }
         model.scan(); model.start()
-        try await Task.sleep(for: .milliseconds(800)); precondition(model.recordCount >= 50)
+        try await waitFor("Model did not publish 50 acquired records") { model.recordCount >= 50 }
         model.chartRefreshing = false
         let first = await model.chartSnapshot(metrics:[.position],side:.output,budget:128)
-        try await Task.sleep(for: .milliseconds(180))
+        let pausedRecordCount = model.recordCount
+        try await waitFor("Recording stopped while the chart was paused") { model.recordCount >= pausedRecordCount + 6 }
         let second = await model.chartSnapshot(metrics:[.position],side:.output,budget:128)
         precondition(first.samples.last?.id == second.samples.last?.id)
         await model.refreshChartFromRecording()
         let refreshed = await model.chartSnapshot(metrics:[.position],side:.output,budget:128)
         precondition(refreshed.samples.last?.id != second.samples.last?.id)
         model.stop(disconnect:true)
-        try await Task.sleep(for:.milliseconds(120)); precondition(model.state == .disconnected && model.stopConfirmed)
+        try await waitFor("Stop/disconnect was not confirmed") { model.state == .disconnected && model.stopConfirmed }
         precondition(model.recordCount == model.stats.received)
         precondition(model.draft.mode == .stop && model.draft.position == 0 && model.draft.kp == 0)
         precondition(model.commands.isEmpty)
         model.draft = MotorCommand(mode: .foc, position: 1, kp: 1)
         model.commands[3] = MotorCommand(id: 3, mode: .foc, position: 1, kp: 1)
         model.connect()
-        try await Task.sleep(for: .milliseconds(80))
+        try await waitFor("Demo reconnect did not become ready") { model.state == .ready }
         precondition(model.draft.mode == .stop && model.commands.isEmpty)
         model.draft = MotorCommand(mode: .foc, torque: 1e8, kp: -1)
         precondition(model.applyDraft())
@@ -205,13 +217,14 @@ import MotorCore
         precondition(displayed == applied)
         model.frequency = 0
         model.start()
-        try await Task.sleep(for: .milliseconds(80))
+        precondition(model.state == .running)
         model.detectMotors()
-        try await Task.sleep(for: .milliseconds(100))
-        precondition(model.state == .ready && model.selectedIDs == [0, 1, 2])
+        try await waitFor("Detection did not stop acquisition and select the discovered motors") {
+            model.state == .ready && model.selectedIDs == [0, 1, 2]
+        }
         precondition(model.draft.mode == .stop && model.commands.isEmpty)
         model.stop(disconnect: true)
-        try await Task.sleep(for: .milliseconds(80))
+        try await waitFor("Final demo disconnect was not confirmed") { model.state == .disconnected && model.stopConfirmed }
         print("PASS Observation isolation, model connect/scan/pause/manual-refresh/stop/disconnect")
     }
     @MainActor static func testReadout() async throws {
@@ -224,20 +237,28 @@ import MotorCore
         try await Task.sleep(for: .milliseconds(30))
         for text in ["first update", "second update", "third update"] {
             model.statisticsText = text
-            try await Task.sleep(for: .milliseconds(30))
-            precondition(view.accessibilityValue() as? String == text, "Native observation failed to rearm")
+            try await waitFor("Native observation failed to rearm") { view.accessibilityValue() as? String == text }
         }
         precondition(!outerInvalidated.value, "Readout registered telemetry with its parent graph")
         view.configure(size: 10, alignment: .left, secondary: false) { model.lastTX }
         model.lastTX = "new source"
         model.statisticsText = "obsolete source"
-        try await Task.sleep(for: .milliseconds(30))
-        precondition(view.accessibilityValue() as? String == "new source")
+        try await waitFor("Readout did not switch observation source") { view.accessibilityValue() as? String == "new source" }
         view.stop()
         model.lastTX = "after teardown"
         try await Task.sleep(for: .milliseconds(30))
         precondition(view.accessibilityValue() as? String == "new source", "Readout updated after teardown")
         print("PASS native readout isolation, repeated updates, source replacement and teardown")
+    }
+    // Async functional checks wait for their observable result. Shared CI hosts
+    // need not meet a fixed frame rate; a missing transition still fails boundedly.
+    @MainActor static func waitFor(_ message: String, timeout: Duration = .seconds(5),
+                                   until condition: @MainActor () async -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while !(await condition()) {
+            precondition(ContinuousClock.now < deadline, message)
+            try await Task.sleep(for: .milliseconds(10))
+        }
     }
 }
 
