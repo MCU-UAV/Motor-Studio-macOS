@@ -24,7 +24,7 @@ bash scripts/build-app.sh
 
 ## 验证状态
 
-性能版曾在 macOS / Apple Silicon 完成 Release 编译与演示验证。最新启动和状态流程修复已通过 **48 项 Linux 协议测试**，并以真实采集引擎运行有状态串口模拟测试；这些最新修复尚未重新完成 Mac 构建和电机实测。当前仓库不承诺全部原版能力或硬件验收完成。
+最新代码已通过 **64 项 macOS XCTest**、原生模型/采集/曲线运行测试及 Apple Silicon + Intel 通用版应用构建（[CI 验证记录](https://github.com/MCU-UAV/Motor-Studio-macOS/actions/runs/43501591589)）。Linux 的 64 项协议测试和真实采集引擎的有状态串口模拟测试也已通过。真实电机、串口时序、固件升级和完整 GUI 操作仍需实测；语言切换尚未实现，当前不承诺全部原版能力或硬件验收完成。
 
 ```bash
 cd macos

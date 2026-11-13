@@ -1,3 +1,18 @@
+# macOS CI 崩溃修复与完整流水线验证 · 2026-11-14
+
+[macOS CI 43501591589](https://github.com/MCU-UAV/Motor-Studio-macOS/actions/runs/43501591589) 在提交 `fd2515d9fd65bb91ecc5728fdc5ad086e6ce6d1d` 上完整通过。本节更新下方历史记录中“本轮尚未完成 Mac 构建”的状态，不替代硬件或人工 GUI 验收。
+
+- **64 项 XCTest 全部通过**。此前 `swift_task_dealloc` / `freed pointer was not the last allocation` 崩溃位于维护流程的默认异步等待返回处，与 [Swift #92017](https://github.com/swiftlang/swift/issues/92017) 的跨模块默认闭包缺陷一致。将默认参数改为 `nil`，在 MotorCore 初始化器内部创建等待闭包后，Apple Swift 6.3.3 / Xcode 26.6 下不再崩溃；等待时长、取消语义、串口协议与保护流程保持原行为。
+- **原生运行测试完整通过**：AppKit 数值观察与销毁、后台采集、命令版本与重启、演示广播、CSV、16 指标索引对照、360001 条一小时合成记录，以及模型连接/扫描/暂停/手动刷新/停止/重连/限幅/自动检测。
+- 共享 CI 中固定“700 ms 至少 55 帧”“60 ms 后命令已更新”等假设会触发测试断言。隔离测试改为同机等长窗口比较，异步功能测试在最多 5 秒内等待实际结果，继续保留功能断言；独立测试程序的部署目标与 MotorCore 统一为 macOS 14。
+- 本轮隔离测试：700 ms 基线 26 帧，主线程阻塞期间 29 帧；演示停止约 0.17 ms。1000 Hz 目标收到 294 帧/约 1 秒，仅记录该 CI 的演示性能，不声称实际达到目标或反映物理串口吞吐。
+- **arm64 + x86_64 Release 通用应用、Info.plist、ad-hoc 签名校验与 ZIP 上传通过**。CI 产物为 `Motor-Studio-Performance-macOS`，尚无 Developer ID 签名/Apple 公证。
+- Linux 复验 64 项 XCTest 与实际 AcquisitionEngine 的锁存启动回归通过：逐台清除后重新开启保护、同步/异步、失败/取消零 FOC、运行超时停止、六类故障帧留存与 CSV 毫秒精度。
+
+未连接物理电机；真实串口、刷写/标定/改 ID 掉电效果、完整窗口交互与 macOS 14/15 运行兼容性仍需实测。Intel 已交叉编译，本轮运行测试在 Apple Silicon 上执行。失败时 CI 现在保存 LLDB 堆栈；正式测试失败仍会使流水线失败。
+
+---
+
 # 六项功能对齐增补 · 2026-11-14
 
 本轮修改：完整多机反馈表、应用自动检测、SDK 参数限幅、真实广播控制、流水异步、0–10000Hz 频率及 TX/RX 分别统计。此前1–30及增补31–36项的当前状态集中在 [逐项对照表](Docs/CASE-MATRIX.md)。下方旧记录中的“广播拒绝”“越界拒绝”“一个在途请求”已由本节的新行为替代。
